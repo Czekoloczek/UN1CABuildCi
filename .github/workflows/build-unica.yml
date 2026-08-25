@@ -35,7 +35,9 @@ on:
       build_zip:
         description: 'Also build the flashable zip (make_rom.sh -z), not just target-files'
         type: boolean
-        default: true
+        # Default OFF after run #1 died on disk during target-files packing.
+        # Get a build to complete first, then decide if there is room for -z.
+        default: false
       upload_artifact:
         description: 'Upload the output as an artifact (SLOW for multi-GB files)'
         type: boolean
@@ -80,6 +82,12 @@ jobs:
       - name: Report free space after cleanup
         run: |
           echo -n 'AFTER CLEANUP: '; df -h / | tail -1
+          # Run #1 ran out of space on / with 27 GB free entering the final pack.
+          # Azure-hosted runners often carry a second, larger ephemeral disk at
+          # /mnt; if one shows up here, relocating out/ onto it roughly doubles
+          # the budget. Purely diagnostic for now.
+          echo '--- all filesystems ---'
+          df -h -x tmpfs -x devtmpfs || true
 
       - name: Clone upstream
         run: |
@@ -161,6 +169,28 @@ jobs:
       - name: Report free space after extract
         run: |
           echo -n 'AFTER EXTRACT: '; df -h / | tail -1
+
+      # build_dependencies.sh compiles android-tools with cmake and apktool with
+      # gradle inside the external/ submodules, then copies only the finished
+      # binaries into out/tools/bin. The object files and gradle trees are dead
+      # weight from here on, but run #1 carried them all the way to the final
+      # pack and died there. Drop them before the expensive stage.
+      #
+      # Only build outputs go — the source trees stay, and out/tools/{bin,venv}
+      # is never touched. out/fw must survive too: create_target_files_zip.sh
+      # reads build.prop out of both firmwares to compose the fingerprints.
+      - name: Reclaim dependency build trees
+        run: |
+          echo -n 'BEFORE PRUNE: '; df -h / | tail -1
+          du -sh unica-src/external 2>/dev/null | sed 's/^/external\/ is /' || true
+          rm -rf unica-src/external/*/build
+          rm -rf unica-src/external/apktool/brut.apktool/*/build
+          rm -rf ~/.gradle/caches ~/.gradle/wrapper
+          echo -n 'AFTER PRUNE:  '; df -h / | tail -1
+          # Sanity: the toolchain we actually depend on must still be intact.
+          test -x unica-src/out/tools/bin/apktool
+          test -x unica-src/out/tools/bin/mkfs.erofs
+          echo 'toolchain OK'
 
       - name: Build ROM
         working-directory: unica-src
