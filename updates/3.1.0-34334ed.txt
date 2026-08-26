@@ -1,0 +1,3 @@
+UN1CA nightly 3.1.0-34334ed
+Upstream: 34334ed603e454bd38d652f20d22ffec2b8ce164
+Kernel: auto-20260823-014515-f35adb2b
